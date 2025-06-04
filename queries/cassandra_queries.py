@@ -33,7 +33,7 @@ def format_produto_cassandra(row):
     preco_formatado = format_currency_br(preco)
     return f"Produto #{id_produto} | Nome: {nome} | Categoria: {categoria} | Preço: {preco_formatado} | Estoque: {estoque}"
 
-def format_mais_vendido_cassandra(row_dict): #
+def format_mais_vendido_cassandra(row_dict):
     nome = row_dict['nome_produto']
     total_vendido = row_dict['total_vendido']
     return f"Produto: {nome} | Quantidade vendida: {total_vendido}"
@@ -53,7 +53,6 @@ def format_total_gasto_cassandra(row_dict):
     total = row_dict['total_gasto']
     total_formatado = format_currency_br(total)
     return f"Cliente: {nome} | Total gasto: {total_formatado}"
-
 
 def run_cassandra_query(description, query, params=None, formatter=None, keyspace='techmarket'):
     auth_provider = PlainTextAuthProvider('cassandra', 'cassandra') 
@@ -85,46 +84,38 @@ def run_cassandra_query(description, query, params=None, formatter=None, keyspac
         session.shutdown()
         cluster.shutdown()
 
-
-if __name__ == "__main__":
-
-    cliente_email_alvo = 'joao-pedro50@example.org'
-    id_cliente_alvo_antes = 'c0e2ae37-3d54-423b-9f25-12c045c159d3'
-
-
-    print(f"\nBuscando ID do cliente para o email: {cliente_email_alvo}")
+def get_first_cliente_id():
+    """Busca o primeiro cliente disponível no banco"""
     auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
     cluster = Cluster(['localhost'], auth_provider=auth_provider)
     session = cluster.connect('techmarket')
-
+    
     try:
-        start_cliente_id_lookup = time.time()
-        cliente_rows = session.execute(
-            "SELECT id FROM cliente WHERE email = %s",
-            (cliente_email_alvo,)
-        )
-        end_cliente_id_lookup = time.time()
-        
-        for row in cliente_rows:
-            id_cliente_alvo = row.id
-            break 
-        
-        if id_cliente_alvo:
-            print(f"ID do Cliente '{cliente_email_alvo}': {id_cliente_alvo} - Tempo: {end_cliente_id_lookup - start_cliente_id_lookup:.4f} s")
-        else:
-            print(f"Cliente com email '{cliente_email_alvo}' não encontrado. Verifique seus dados. - Tempo: {end_cliente_id_lookup - start_cliente_id_lookup:.4f} s")
-
+        rows = session.execute("SELECT id, email FROM cliente LIMIT 1")
+        for row in rows:
+            return row.id, row.email
+        return None, None
     except Exception as e:
-        print(f"Erro ao buscar ID do cliente: {e}")
+        print(f"Erro ao buscar cliente: {e}")
+        return None, None
     finally:
         session.shutdown()
         cluster.shutdown()
 
-    if not id_cliente_alvo:
-        print("Não foi possível continuar as consultas relacionadas ao cliente sem o ID.")
-        exit() 
+if __name__ == "__main__":
     
-    run_cassandra_query("\nQ1 - Últimos 3 pedidos por email",
+    # Buscar um cliente dinamicamente
+    print("\nBuscando primeiro cliente disponível...")
+    id_cliente_alvo, email_cliente = get_first_cliente_id()
+    
+    if not id_cliente_alvo:
+        print("Nenhum cliente encontrado no banco de dados.")
+        exit()
+    
+    print(f"Cliente encontrado: {email_cliente} (ID: {id_cliente_alvo})")
+    
+    # Q1 - Últimos 3 pedidos do cliente encontrado
+    run_cassandra_query("\nQ1 - Últimos 3 pedidos do cliente",
                         """
                         SELECT id_pedido, id_cliente, data_pedido, status, valor_total
                         FROM pedido_por_cliente
@@ -133,15 +124,51 @@ if __name__ == "__main__":
                         """,
                         (id_cliente_alvo,), formatter=format_row_pedido)
     
-    run_cassandra_query("\nQ2 - Produtos da categoria ordenados por preço",
-                        """
-                        SELECT id, nome, categoria, preco, estoque
-                        FROM produto_por_categoria
-                        WHERE categoria = %s
-                        LIMIT 5
-                        """,
-                        ('Monitores',), formatter=format_produto_cassandra)
+    # Q2 - Produtos da categoria Monitores (ou primeira categoria disponível)
+    auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
+    cluster = Cluster(['localhost'], auth_provider=auth_provider)
+    session = cluster.connect('techmarket')
     
+    try:
+        # Buscar primeira categoria disponível
+        categoria_rows = session.execute("SELECT DISTINCT categoria FROM produto_por_categoria LIMIT 1")
+        categoria_alvo = None
+        for row in categoria_rows:
+            categoria_alvo = row.categoria
+            break
+            
+        if categoria_alvo:
+            print(f"\nUsando categoria: {categoria_alvo}")
+            start_q2 = time.time()
+            q2_rows = session.execute(
+                """
+                SELECT id, nome, categoria, preco, estoque
+                FROM produto_por_categoria
+                WHERE categoria = %s
+                LIMIT 5
+                """,
+                (categoria_alvo,)
+            )
+            end_q2 = time.time()
+            
+            print(f"Q2 - Produtos da categoria ordenados por preço - Tempo: {end_q2 - start_q2:.4f} s")
+            results_found = False
+            for row in q2_rows:
+                print(format_produto_cassandra(row))
+                results_found = True
+            
+            if not results_found:
+                print("Nenhum resultado encontrado.")
+        else:
+            print("Nenhuma categoria encontrada.")
+            
+    except Exception as e:
+        print(f"Erro ao executar Q2: {e}")
+    finally:
+        session.shutdown()
+        cluster.shutdown()
+    
+    # Q3 - Pedidos entregues do cliente
     auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
     cluster = Cluster(['localhost'], auth_provider=auth_provider)
     session = cluster.connect('techmarket')
@@ -152,7 +179,7 @@ if __name__ == "__main__":
             SELECT id_pedido, id_cliente, data_pedido, status, valor_total
             FROM pedido_por_cliente
             WHERE id_cliente = %s
-            LIMIT 5
+            LIMIT 10
         """
         q3_rows = session.execute(q3_query, (id_cliente_alvo,))
         
@@ -162,7 +189,7 @@ if __name__ == "__main__":
                 q3_results.append(row)
                 
         end_q3 = time.time()
-        print(f"Q3 - Pedidos entregues de um cliente - Tempo: {end_q3 - start_q3:.4f} s")
+        print(f"\nQ3 - Pedidos entregues do cliente - Tempo: {end_q3 - start_q3:.4f} s")
         if not q3_results:
             print("Nenhum resultado encontrado.")
         for row in q3_results:
@@ -173,13 +200,14 @@ if __name__ == "__main__":
         session.shutdown()
         cluster.shutdown()
  
+    # Q4 - Top 5 produtos mais vendidos
     auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
     cluster = Cluster(['localhost'], auth_provider=auth_provider)
     session = cluster.connect('techmarket')
     
     try:
         start_q4 = time.time()
-        all_pedidos = session.execute("SELECT itens FROM pedido_por_cliente LIMIT 5 ALLOW FILTERING;") 
+        all_pedidos = session.execute("SELECT itens FROM pedido_por_cliente LIMIT 100 ALLOW FILTERING;") 
         vendas_por_produto_id = {}
         for pedido_row in all_pedidos:
             if pedido_row.itens: 
@@ -189,9 +217,12 @@ if __name__ == "__main__":
         produto_nomes = {}
         if vendas_por_produto_id:
             for prod_id in vendas_por_produto_id.keys():
-                prod_row = session.execute("SELECT nome FROM produto WHERE id = %s", (prod_id,)).one()
-                if prod_row:
-                    produto_nomes[prod_id] = prod_row.nome
+                try:
+                    prod_row = session.execute("SELECT nome FROM produto WHERE id = %s", (prod_id,)).one()
+                    if prod_row:
+                        produto_nomes[prod_id] = prod_row.nome
+                except:
+                    continue
         
         final_vendas = []
         for prod_id, total_vendido in vendas_por_produto_id.items():
@@ -201,7 +232,7 @@ if __name__ == "__main__":
         sorted_vendas = sorted(final_vendas, key=lambda item: item['total_vendido'], reverse=True)[:5]
         
         end_q4 = time.time()
-        print(f"Q4 - Top 5 produtos mais vendidos - Tempo: {end_q4 - start_q4:.4f} s")
+        print(f"\nQ4 - Top 5 produtos mais vendidos - Tempo: {end_q4 - start_q4:.4f} s")
         if not sorted_vendas:
             print("Nenhum resultado encontrado.")
         for item in sorted_vendas:
@@ -213,6 +244,7 @@ if __name__ == "__main__":
         session.shutdown()
         cluster.shutdown()
 
+    # Q5 - Pagamentos via PIX no último mês
     um_mes_atras = datetime.now() - timedelta(days=30)
     
     run_cassandra_query("\nQ5 - Pagamentos via PIX no último mês",
@@ -225,6 +257,7 @@ if __name__ == "__main__":
                         """,
                         ('pix', um_mes_atras), formatter=format_pagamento_cassandra)
     
+    # Q6 - Total gasto pelo cliente nos últimos 3 meses
     auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
     cluster = Cluster(['localhost'], auth_provider=auth_provider)
     session = cluster.connect('techmarket')
@@ -237,7 +270,7 @@ if __name__ == "__main__":
                    SELECT valor_total
                    FROM pedido_por_cliente
                    WHERE id_cliente = %s AND data_pedido >= %s
-                   LIMIT 5
+                   LIMIT 20
                    """
         q6_rows = session.execute(q6_query, (id_cliente_alvo, tres_meses_atras))
         
@@ -246,8 +279,8 @@ if __name__ == "__main__":
             total_gasto += row.valor_total
             
         end_q6 = time.time()
-        print(f"Q6 - Total gasto por cliente nos últimos 3 meses - Tempo: {end_q6 - start_q6:.4f} s")
-        print(format_total_gasto_cassandra({'cliente_nome': cliente_email_alvo, 'total_gasto': total_gasto}))
+        print(f"\nQ6 - Total gasto pelo cliente nos últimos 3 meses - Tempo: {end_q6 - start_q6:.4f} s")
+        print(format_total_gasto_cassandra({'cliente_nome': email_cliente, 'total_gasto': total_gasto}))
     except Exception as e:
         print(f"Erro ao executar Q6: {e}")
     finally:
