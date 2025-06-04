@@ -51,20 +51,34 @@ def run_query(description, query, params=None, formatter=None):
     conn.close()
 
 def get_first_cliente():
-    """Busca o primeiro cliente disponível no banco"""
+    """
+    Busca o primeiro cliente disponível no banco que possui pelo menos um pedido associado.
+    Isso ajuda a garantir que as consultas subsequentes (Q1, Q3, Q6) encontrem dados.
+    """
     conn = psycopg2.connect(
-        host="localhost", database="techmarket",
-        user="techmarket", password="password"
+        host="localhost",
+        database="techmarket",
+        user="techmarket",
+        password="password"
     )
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT email, nome FROM cliente LIMIT 1")
+        # Consulta para encontrar um cliente que tenha pelo menos um pedido
+        cursor.execute("""
+            SELECT c.email, c.nome, c.id -- Incluir c.id para depuração, se necessário
+            FROM cliente c
+            JOIN pedido p ON p.id_cliente = c.id
+            GROUP BY c.id, c.email, c.nome -- Agrupar por todos os campos selecionados
+            HAVING COUNT(p.id) > 0
+            LIMIT 1;
+        """)
         result = cursor.fetchone()
         if result:
-            return result[0], result[1]  # email, nome
+            print(f"DEBUG: Cliente encontrado com pedidos: ID={result[2]}, Email={result[0]}")
+            return result[0], result[1]  
         return None, None
     except Exception as e:
-        print(f"Erro ao buscar cliente: {e}")
+        print(f"Erro ao buscar cliente com pedidos: {e}")
         return None, None
     finally:
         cursor.close()
@@ -115,7 +129,7 @@ if __name__ == "__main__":
               JOIN pedido p ON p.id_cliente = c.id
               WHERE c.email = %s
               ORDER BY p.data_pedido DESC
-              LIMIT 3
+              LIMIT 4
               """,
               (email_cliente,), formatter=format_row)
    
@@ -125,6 +139,7 @@ if __name__ == "__main__":
           SELECT * FROM produto
           WHERE categoria = %s
           ORDER BY preco ASC
+          LIMIT 10
           """,
           (categoria,), formatter=format_produto)
    
@@ -136,6 +151,7 @@ if __name__ == "__main__":
               JOIN pedido p ON p.id_cliente = c.id
               WHERE c.email = %s AND p.status = 'entregue'
               ORDER BY p.data_pedido DESC
+              LIMIT 10
               """,
               (email_cliente,), formatter=format_row)
    
@@ -157,6 +173,7 @@ if __name__ == "__main__":
               FROM pagamento
               WHERE tipo = 'pix' AND data_pagamento >= NOW() - INTERVAL '1 month'
               ORDER BY data_pagamento DESC
+              LIMIT 10
               """, formatter=format_pagamento)
    
     # Q6 - Total gasto pelo primeiro cliente nos últimos 3 meses
@@ -167,5 +184,6 @@ if __name__ == "__main__":
               JOIN pedido p ON p.id_cliente = c.id
               WHERE c.email = %s AND p.data_pedido >= NOW() - INTERVAL '3 months'
               GROUP BY c.nome
+              LIMIT 10
               """,
               (email_cliente,), formatter=format_total_gasto)
