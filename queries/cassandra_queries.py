@@ -88,8 +88,9 @@ def run_cassandra_query(description, query, params=None, formatter=None, keyspac
 
 if __name__ == "__main__":
 
-    cliente_email_alvo = 'bjesus@example.net'
-    id_cliente_alvo = None
+    cliente_email_alvo = 'joao-pedro50@example.org'
+    id_cliente_alvo_antes = 'c0e2ae37-3d54-423b-9f25-12c045c159d3'
+
 
     print(f"\nBuscando ID do cliente para o email: {cliente_email_alvo}")
     auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
@@ -137,6 +138,7 @@ if __name__ == "__main__":
                         SELECT id, nome, categoria, preco, estoque
                         FROM produto_por_categoria
                         WHERE categoria = %s
+                        LIMIT 5
                         """,
                         ('Monitores',), formatter=format_produto_cassandra)
     
@@ -147,10 +149,11 @@ if __name__ == "__main__":
     try:
         start_q3 = time.time()
         q3_query = """
-                   SELECT id_pedido, id_cliente, data_pedido, status, valor_total
-                   FROM pedido_por_cliente
-                   WHERE id_cliente = %s
-                   """
+            SELECT id_pedido, id_cliente, data_pedido, status, valor_total
+            FROM pedido_por_cliente
+            WHERE id_cliente = %s
+            LIMIT 5
+        """
         q3_rows = session.execute(q3_query, (id_cliente_alvo,))
         
         q3_results = []
@@ -176,7 +179,7 @@ if __name__ == "__main__":
     
     try:
         start_q4 = time.time()
-        all_pedidos = session.execute("SELECT itens FROM pedido_por_cliente ALLOW FILTERING") 
+        all_pedidos = session.execute("SELECT itens FROM pedido_por_cliente LIMIT 5 ALLOW FILTERING;") 
         vendas_por_produto_id = {}
         for pedido_row in all_pedidos:
             if pedido_row.itens: 
@@ -218,6 +221,7 @@ if __name__ == "__main__":
                         FROM pagamento_por_tipo_data
                         WHERE tipo = %s AND data_pagamento >= %s
                         ORDER BY data_pagamento DESC
+                        LIMIT 5;
                         """,
                         ('pix', um_mes_atras), formatter=format_pagamento_cassandra)
     
@@ -233,6 +237,7 @@ if __name__ == "__main__":
                    SELECT valor_total
                    FROM pedido_por_cliente
                    WHERE id_cliente = %s AND data_pedido >= %s
+                   LIMIT 5
                    """
         q6_rows = session.execute(q6_query, (id_cliente_alvo, tres_meses_atras))
         
