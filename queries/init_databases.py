@@ -87,11 +87,13 @@ def init_mongodb():
     client = MongoClient('mongodb://techmarket:password@localhost:27017/')
     db = client['techmarket']
 
-    # Criar coleções
-    db.create_collection('clientes')
-    db.create_collection('produtos')
-    db.create_collection('pedidos')
-    db.create_collection('pagamentos')
+    # Verifica se as coleções existem, se não, cria
+    colecoes_necessarias = ['clientes', 'produtos', 'pedidos', 'pagamentos']
+    colecoes_existentes = db.list_collection_names()
+
+    for colecao in colecoes_necessarias:
+        if colecao not in colecoes_existentes:
+            db.create_collection(colecao)
 
     # Criar índices
     db.clientes.create_index('email', unique=True)

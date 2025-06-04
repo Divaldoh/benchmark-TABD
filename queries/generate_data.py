@@ -1,6 +1,6 @@
 # generate_data.py
 import psycopg2
-from pymongo import MongoClient, InsertMany
+from pymongo import MongoClient
 from cassandra.cluster import Cluster
 from faker import Faker
 import random
@@ -33,9 +33,9 @@ def gerar_clientes(num):
         cliente = {
             'id': i,
             'nome': fake.name(),
-            'email': fake.email(),
+            'email': fake.unique.email(),
             'telefone': fake.phone_number(),
-            'data_cadastro': fake.date_between(start_date='-3y', end_date='today'),
+            'data_cadastro': fake.date_time_between(start_date='-3y', end_date=datetime.now()),
             'cpf': fake.cpf()
         }
         clientes.append(cliente)
@@ -60,7 +60,7 @@ def gerar_pedidos(num, clientes, produtos):
 
     for i in range(1, num + 1):
         cliente_id = random.choice(clientes)['id']
-        data_pedido = fake.date_time_between(start_date='-1y', end_date='now')
+        data_pedido = fake.date_time_between(start_date='-1y', end_date=datetime.now())
         status = random.choice(STATUS_PEDIDO)
 
         # Gerar itens do pedido (1 a 5 itens)
@@ -127,6 +127,13 @@ def inserir_postgres(clientes, produtos, pedidos, itens_pedido, pagamentos):
     )
     cursor = conn.cursor()
 
+    # Limpar dados antigos
+    cursor.execute("DELETE FROM pagamento")
+    cursor.execute("DELETE FROM item_pedido")
+    cursor.execute("DELETE FROM pedido")
+    cursor.execute("DELETE FROM produto")
+    cursor.execute("DELETE FROM cliente")
+
     # Inserir clientes
     for cliente in clientes:
         cursor.execute(
@@ -178,6 +185,12 @@ def inserir_mongodb(clientes, produtos, pedidos, pagamentos):
     client = MongoClient('mongodb://techmarket:password@localhost:27017/')
     db = client['techmarket']
 
+    # Limpar dados antigos
+    db.clientes.delete_many({})
+    db.produtos.delete_many({})
+    db.pedidos.delete_many({})
+    db.pagamentos.delete_many({})
+
     # Inserir clientes
     db.clientes.insert_many(clientes)
 
@@ -201,6 +214,14 @@ def inserir_cassandra(clientes, produtos, pedidos, pagamentos):
 
     cluster = Cluster(['localhost'])
     session = cluster.connect('techmarket')
+
+    # Limpar dados antigos
+    session.execute("TRUNCATE cliente")
+    session.execute("TRUNCATE produto")
+    session.execute("TRUNCATE produto_por_categoria")
+    session.execute("TRUNCATE pedido_por_cliente")
+    session.execute("TRUNCATE pagamento_por_tipo_data")
+
 
     # Preparar statements
     insert_cliente = session.prepare(
