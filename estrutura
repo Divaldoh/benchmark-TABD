@@ -1,0 +1,13 @@
+.
+├── README.md
+├── docker-compose.yml
+├── estrutura
+├── queries
+│   ├── generate_data.py
+│   └── init_databases.py
+├── requirements.txt
+└── venv
+    ├── lib64 -> lib
+    └── pyvenv.cfg
+
+1618 directories, 4283 files
