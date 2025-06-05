@@ -109,7 +109,7 @@ def init_mongodb():
 def init_cassandra():
     print("Inicializando Cassandra...")
     # Aguardar Cassandra iniciar completamente
-    time.sleep(30)
+    time.sleep(60)
 
     cluster = Cluster(['localhost'])
     session = cluster.connect()

@@ -84,6 +84,44 @@ def run_cassandra_query(description, query, params=None, formatter=None, keyspac
         session.shutdown()
         cluster.shutdown()
 
+def find_cliente_with_status(status_alvo='entregue'):
+    """Busca um cliente que tenha pedidos com o status especificado."""
+    auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
+    cluster = Cluster(['localhost'], auth_provider=auth_provider)
+    session = cluster.connect('techmarket')
+    
+    try:
+        # Busca todos os pedidos e filtra por status
+        query = "SELECT id_cliente, status FROM pedido_por_cliente LIMIT 100 ALLOW FILTERING"
+        rows = session.execute(query)
+        
+        clientes_com_status = set()
+        for row in rows:
+            if row.status == status_alvo:
+                clientes_com_status.add(row.id_cliente)
+        
+        if clientes_com_status:
+            # Pega o primeiro cliente encontrado
+            id_cliente = list(clientes_com_status)[0]
+            print(f"Cliente com status '{status_alvo}' encontrado: {id_cliente}")
+            
+            # Busca o email do cliente
+            email_query = "SELECT email FROM cliente WHERE id = %s"
+            email_rows = session.execute(email_query, (id_cliente,))
+            
+            for email_row in email_rows:
+                return id_cliente, email_row.email
+            
+        print(f"Nenhum cliente encontrado com status '{status_alvo}'.")
+        return None, None
+    
+    except Exception as e:
+        print(f"Erro ao buscar cliente com status {status_alvo}: {e}")
+        return None, None
+    finally:
+        session.shutdown()
+        cluster.shutdown()
+
 def get_first_cliente_id():
     """Busca o primeiro cliente disponível no banco"""
     auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
@@ -102,15 +140,55 @@ def get_first_cliente_id():
         session.shutdown()
         cluster.shutdown()
 
+def check_available_status():
+    """Verifica quais status estão disponíveis no banco"""
+    auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
+    cluster = Cluster(['localhost'], auth_provider=auth_provider)
+    session = cluster.connect('techmarket')
+    
+    try:
+        rows = session.execute("SELECT status FROM pedido_por_cliente LIMIT 50 ALLOW FILTERING")
+        status_set = set()
+        for row in rows:
+            status_set.add(row.status)
+        
+        print("Status disponíveis no banco:")
+        for status in sorted(status_set):
+            print(f"- {status}")
+        
+        return status_set
+    except Exception as e:
+        print(f"Erro ao verificar status: {e}")
+        return set()
+    finally:
+        session.shutdown()
+        cluster.shutdown()
+
 if __name__ == "__main__":
     
-    # Buscar um cliente dinamicamente
-    print("\nBuscando primeiro cliente disponível...")
-    id_cliente_alvo, email_cliente = get_first_cliente_id()
+    # Primeiro, vamos verificar quais status existem
+    print("\nVerificando status disponíveis...")
+    available_status = check_available_status()
+    
+    # Buscar um cliente dinamicamente que tenha pedidos 'entregue'
+    print("\nBuscando primeiro cliente com pedidos entregues...")
+    id_cliente_alvo, email_cliente = find_cliente_with_status('entregue')
     
     if not id_cliente_alvo:
-        print("Nenhum cliente encontrado no banco de dados.")
-        exit()
+        print("Nenhum cliente encontrado com pedidos entregues no banco de dados.")
+        
+        # Tenta com outros status se 'entregue' não existir
+        if 'enviado' in available_status:
+            print("Tentando buscar cliente com pedidos 'enviado'...")
+            id_cliente_alvo, email_cliente = find_cliente_with_status('enviado')
+        
+        if not id_cliente_alvo:
+            print("Buscando qualquer cliente disponível...")
+            id_cliente_alvo, email_cliente = get_first_cliente_id()
+            
+            if not id_cliente_alvo:
+                print("Nenhum cliente encontrado no banco de dados.")
+                exit()
     
     print(f"Cliente encontrado: {email_cliente} (ID: {id_cliente_alvo})")
     
@@ -168,28 +246,34 @@ if __name__ == "__main__":
         session.shutdown()
         cluster.shutdown()
     
-    # Q3 - Pedidos entregues do cliente
+    # Q3 - Pedidos entregues do cliente (ou com status disponível)
     auth_provider = PlainTextAuthProvider('cassandra', 'cassandra')
     cluster = Cluster(['localhost'], auth_provider=auth_provider)
     session = cluster.connect('techmarket')
     
     try:
         start_q3 = time.time()
+        
+        # Determina qual status usar para o Q3
+        status_para_q3 = 'entregue' if 'entregue' in available_status else ('enviado' if 'enviado' in available_status else list(available_status)[0] if available_status else 'entregue')
+        
         q3_query = """
             SELECT id_pedido, id_cliente, data_pedido, status, valor_total
             FROM pedido_por_cliente
             WHERE id_cliente = %s
             LIMIT 10
         """
+        print(f"Executando Q3 para cliente: {id_cliente_alvo}, buscando status: {status_para_q3}")
         q3_rows = session.execute(q3_query, (id_cliente_alvo,))
         
         q3_results = []
         for row in q3_rows:
-            if row.status == 'entregue':
+            if row.status == status_para_q3:
+                print(f"Pedido encontrado: {row.id_pedido}, Status: {row.status}")
                 q3_results.append(row)
                 
         end_q3 = time.time()
-        print(f"\nQ3 - Pedidos entregues do cliente - Tempo: {end_q3 - start_q3:.4f} s")
+        print(f"\nQ3 - Pedidos com status '{status_para_q3}' do cliente - Tempo: {end_q3 - start_q3:.4f} s")
         if not q3_results:
             print("Nenhum resultado encontrado.")
         for row in q3_results:
@@ -270,7 +354,8 @@ if __name__ == "__main__":
                    SELECT valor_total
                    FROM pedido_por_cliente
                    WHERE id_cliente = %s AND data_pedido >= %s
-                   LIMIT 20
+                   LIMIT 5
+                   ALLOW FILTERING
                    """
         q6_rows = session.execute(q6_query, (id_cliente_alvo, tres_meses_atras))
         
